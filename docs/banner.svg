@@ -1,0 +1,54 @@
+<svg width="900" height="220" viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0014"/>
+      <stop offset="55%" stop-color="#120458"/>
+      <stop offset="100%" stop-color="#0a0014"/>
+    </linearGradient>
+    <filter id="glowCyan" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glowMagenta" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="900" height="220" fill="url(#bg)"/>
+
+  <g opacity="0.12" stroke="#08f7fe" stroke-width="1">
+    <line x1="0" y1="20" x2="900" y2="20"/>
+    <line x1="0" y1="46" x2="900" y2="46"/>
+    <line x1="0" y1="174" x2="900" y2="174"/>
+    <line x1="0" y1="200" x2="900" y2="200"/>
+  </g>
+
+  <g stroke="#ff2079" stroke-width="2" fill="none" opacity="0.9">
+    <path d="M18 18 L18 42 M18 18 L42 18"/>
+    <path d="M882 202 L882 178 M882 202 L858 202"/>
+  </g>
+  <g stroke="#08f7fe" stroke-width="2" fill="none" opacity="0.9">
+    <path d="M882 18 L882 42 M882 18 L858 18"/>
+    <path d="M18 202 L18 178 M18 202 L42 202"/>
+  </g>
+
+  <g font-family="'Courier New', Consolas, monospace" text-anchor="middle">
+    <text x="452" y="112" font-size="64" font-weight="bold" fill="#08f7fe" filter="url(#glowCyan)">P4WNP1e</text>
+    <text x="448" y="108" font-size="64" font-weight="bold" fill="#ff2079" filter="url(#glowMagenta)" opacity="0.85">P4WNP1e</text>
+    <text x="450" y="110" font-size="64" font-weight="bold" fill="#f5f3ff">P4WNP1e</text>
+
+    <text x="450" y="150" font-size="19" letter-spacing="6" fill="#08f7fe" filter="url(#glowCyan)">RASPBERRY PI 4B EDITION</text>
+    <text x="450" y="150" font-size="19" letter-spacing="6" fill="#e8e6ff">RASPBERRY PI 4B EDITION</text>
+
+    <text x="450" y="188" font-size="13" letter-spacing="3" fill="#ff2079" opacity="0.9">USB-C GADGET // ARM64 // KALI</text>
+  </g>
+</svg>
