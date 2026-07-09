@@ -3,8 +3,14 @@
 This branch (`pi4b-port`) ports [RoganDawes/P4wnP1_aloa](https://github.com/RoganDawes/P4wnP1_aloa)
 (itself a continuation of mame82's original P4wnP1 A.L.O.A.) from its sole
 original target — Raspberry Pi Zero W (BCM2835, ARMv6, single core) — to the
-Raspberry Pi 4 Model B (BCM2711, Cortex-A72 arm64), running the current
-Raspberry Pi OS (Bookworm, arm64).
+Raspberry Pi 4 Model B (BCM2711, Cortex-A72 arm64).
+
+`build_support/pi4b/image/build-image.sh` supports two base images
+(`BASE_DISTRO=kali`, the default, or `BASE_DISTRO=raspios`) - see "Base image:
+Kali vs. Raspberry Pi OS" below for why Kali is the recommended default.
+Everything else in this document (dwc2/gadget, GPIO, LED, build tags, etc.)
+applies identically to both; they're both Debian-based and both default to
+NetworkManager.
 
 Everything below was arrived at by actually reading the upstream source
 (not guessing from the project's reputation) and, where possible, by actually
@@ -176,6 +182,64 @@ tells NetworkManager to leave exactly those interfaces alone, without
 disabling it wholesale — so a physical `eth0` or an unrelated WiFi adapter
 still gets normal DHCP/NM convenience, which the old blanket-disable approach
 didn't preserve.
+
+## Base image: Kali vs. Raspberry Pi OS
+
+First pass of this port defaulted to vanilla Raspberry Pi OS Lite arm64,
+mainly because upstream's own build notes describe official Kali image
+support for P4wnP1 as having "disappeared" years ago, and the goal was to
+stop depending on anything unmaintained. Worth being upfront that this was a
+judgment call re-examined once it came up directly, not something re-derived
+from scratch — the reasoning holds up, but the conclusion changed:
+
+Kali now ships an actively maintained, **officially packaged** nexmon for
+Raspberry Pi boards. Since **Kali 2025.1** (confirmed via
+[kali.org/blog/raspberry-pi-wi-fi-glow-up](https://www.kali.org/blog/raspberry-pi-wi-fi-glow-up/)):
+
+```sh
+sudo apt install brcmfmac-nexmon-dkms firmware-nexmon
+```
+
+- `brcmfmac-nexmon-dkms` — DKMS-based `brcmfmac` driver with nexmon patches,
+  auto-rebuilt against kernel updates (no more "the custom kernel branch
+  stopped being ported forward" problem that killed the *original* P4wnP1
+  Kali support).
+- `firmware-nexmon` — nexmon-patched firmware for supported Broadcom chips.
+- Officially tested on Pi 5, Pi 4 (both 32- and 64-bit), Pi 3B(+), Zero W,
+  Zero 2 W. Kali's own blog post explicitly calls out Pi 4 as their
+  best-performing supported board.
+- Monitor mode becomes `airmon-ng start wlan0` → creates a `wlan0mon`
+  interface. Kali also confirmed (checked separately) to default to
+  NetworkManager on its Pi images too, same as Bookworm, so
+  `build_support/pi4b/network/10-p4wnp1-unmanaged.conf` applies unchanged.
+
+Given this toolkit's whole workflow is already Kali-based, and this removes
+the single most fragile, unverified piece of the port (a hand-built,
+from-source nexmon firmware patch with no CI, no maintainer, matched by hand
+to a specific kernel headers version) in favor of something Kali's own team
+keeps working across kernel bumps — `BASE_DISTRO=kali` is now the default in
+`build-image.sh`. `BASE_DISTRO=raspios` (using
+`build_support/pi4b/nexmon/build-nexmon.sh`'s from-source build) is kept for
+anyone who specifically wants a non-Kali image.
+
+**Caveat worth stating plainly:** Kali's DKMS nexmon is architecturally
+different from how P4wnP1 originally used nexmon on Pi0W. The Pi0W firmware
+was a single image that P4wnP1 swapped in/out and reloaded the whole
+`brcmfmac` module for (`service/wifi.go`'s `setNexmonFirmware()`, this port's
+fix for the previously-stubbed nexmon toggle). Kali's DKMS package installs
+one always-on nexmon-patched firmware system-wide and exposes monitor mode as
+an *additional* `wlan0mon` interface via `airmon-ng`/`iw`, coexisting with
+the normal `wlan0` P4wnP1 already manages for AP/STA — no swap-and-reload
+needed or possible. On a `BASE_DISTRO=kali` build, `detectBrcmfmacFirmwareBase()`
+won't find the `.rpi.bin`/`.nexmon.bin` variant files it looks for (there's
+only ever one firmware installed), so the CLI/WebUI's "Nexmon" toggle will
+log a harmless warning and otherwise no-op — monitor mode still works, just
+via `airmon-ng`/`iw` directly rather than through that toggle. Wiring
+`wlan0mon` creation into the gRPC-driven Nexmon flag (so KARMA-style sniffing
+can run through the same UI as everything else) is a real feature change,
+not a port task, and is left as follow-up work rather than something
+attempted blind without hardware to validate the interaction with the
+existing hostapd/wpa_supplicant lifecycle.
 
 ## Explicitly not ported (and why)
 

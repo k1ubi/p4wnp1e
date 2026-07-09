@@ -4,6 +4,15 @@
 # and toggled on/off exactly like the Pi0W images did (P4wnP1_cli wifi set ap
 # --nonexmon / with nexmon, see service/wifi.go and dist/scripts/servicestart.sh).
 #
+# ONLY NEEDED FOR BASE_DISTRO=raspios. If you're building on Kali (the
+# default in build_support/pi4b/image/build-image.sh), skip this script
+# entirely: Kali has shipped officially maintained DKMS-based nexmon packages
+# since 2025.1 (brcmfmac-nexmon-dkms + firmware-nexmon, confirmed against
+# kali.org/blog/raspberry-pi-wi-fi-glow-up), which cover Pi4B's bcm43455c0
+# out of the box via `apt install` - no from-source firmware build, and no
+# DKMS-vs-kernel-version maintenance burden on you. This script exists for
+# people who specifically want a vanilla Raspberry Pi OS image instead.
+#
 # WHAT CHANGED FROM THE PI0W BUILD (build_support/rpi0w-nexmon-p4wnp1-aloa.sh)
 # ==============================================================================
 # Pi0W's WiFi chip is a Broadcom BCM43430A1 (patches/bcm43430a1/7_45_41_46 in
