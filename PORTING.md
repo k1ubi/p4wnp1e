@@ -328,11 +328,26 @@ This session had a real arm64 Go toolchain (this dev box is arm64 Linux) but
   tree directly.
 - No cgo dependency anywhere in the tree, and a real `CGO_ENABLED=0
   GOARCH=arm64` cross-build succeeding.
+- Every USB gadget kernel module `SubSysUSB.go` needs -
+  `dwc2`, `libcomposite`, `usb_f_hid`, `usb_f_rndis`, `usb_f_ecm`,
+  `usb_f_mass_storage`, `usb_f_acm` - present in the actual kernel package
+  Kali ships for Pi4/5 (`linux-image-6.12.34+rpt-rpi-v8`, downloaded and
+  inspected directly with `dpkg-deb -c`, not assumed from "Raspberry Pi
+  kernels usually have this").
+- Every `exec.Command(...)` external binary dependency in `service/*.go`
+  (`iw`, `wpa_supplicant`, `wpa_passphrase`, `hostapd`, `dnsmasq`,
+  `bluetoothd`, `dhcpcd`, `lsmod`/`modprobe`/`rmmod`) cross-checked against
+  the image's package list - found and fixed one real gap (`dhcpcd` was
+  missing entirely, see "Base image" section below).
 
 **Not verified (needs real Pi4B hardware, which this session didn't have):**
-- Actually booting the assembled image, dwc2 binding to a UDC in peripheral
-  mode on the USB-C port, and a host OS actually enumerating the composite
-  gadget (HID/RNDIS/mass storage).
+- Actually booting the assembled image and a host OS enumerating the
+  composite gadget end-to-end (kernel modules and UDC binding are confirmed
+  present per above; what's unverified is the full runtime path - configfs
+  gadget creation succeeding, the host OS's driver picking it up, etc.).
+  `build_support/pi4b/verify-on-device.sh` checks the whole chain in one
+  pass on real hardware - dwc2/UDC state, every gadget module, GPIO, LED,
+  Bluetooth, WiFi/nexmon, every required binary.
 - `periph.io/x/host/v3` GPIO actually toggling real pins / trigger actions
   firing off real button presses on the 40-pin header.
 - The ACT LED sysfs-name fix actually lighting up the right LED.

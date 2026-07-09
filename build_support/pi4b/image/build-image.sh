@@ -258,7 +258,10 @@ systemctl enable P4wnP1.service
 # (service/SubSysUSB.go's CheckLibComposite), nothing to enable here.
 CHROOT_EOF
 
+install -m 0755 "$REPO_ROOT/build_support/pi4b/verify-on-device.sh" "$ROOTFS/usr/local/P4wnP1/verify-on-device.sh"
+
 echo "=== Done. Image assembled at $IMG ==="
+echo "After first boot, run 'sudo /usr/local/P4wnP1/verify-on-device.sh' to smoke-test every subsystem this port touches in one pass."
 echo "Compress + flash, e.g.:"
 echo "  xz -T0 -k \"$IMG\""
 echo "  rpi-imager --cli \"$IMG.xz\" /dev/sdX     # or: dd if=\"$IMG\" of=/dev/sdX bs=4M status=progress"

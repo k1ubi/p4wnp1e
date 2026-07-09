@@ -65,6 +65,14 @@ xz -d build_support/pi4b/image/out/work/base.img.xz
 sudo dd if=build_support/pi4b/image/out/work/base.img of=/dev/sdX bs=4M status=progress
 ```
 
+First boot, run the smoke test — checks dwc2/UDC, every USB gadget kernel
+module, GPIO, LED, Bluetooth, WiFi/nexmon, and every binary the backend
+hard-depends on, in one pass:
+
+```sh
+sudo /usr/local/P4wnP1/verify-on-device.sh
+```
+
 ### `> STATUS`
 
 Backend builds clean, native, `linux/arm64`. Board-support gaps (GPIO, LED,
