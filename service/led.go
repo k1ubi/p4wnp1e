@@ -11,8 +11,6 @@ import(
 )
 
 const (
-	LED_TRIGGER_PATH = "/sys/class/leds/led0/trigger"
-	LED_BRIGHTNESS_PATH = "/sys/class/leds/led0/brightness"
 	LED_TRIGGER_MANUAL = "none"
 	LED_ON = "0"
 	LED_OFF = "1"
@@ -20,6 +18,30 @@ const (
 	LED_DELAY_OFF = 200 * time.Millisecond
 	LED_DELAY_PAUSE = 500 * time.Millisecond
 )
+
+// Pi4B PORT NOTE: upstream hardcoded /sys/class/leds/led0, which is Pi Zero
+// W's (and older boards') sysfs name for the green ACT LED. Pi4B's device
+// tree labels it "ACT" instead (confirmed against raspberrypi/linux's
+// bcm283x-rpi-led-deprecated.dtsi: `led_act: led-act { label = "ACT"; ...}`,
+// included by bcm2711-rpi-4-b.dts) - so it shows up as /sys/class/leds/ACT,
+// not led0. Some Raspberry Pi OS releases add a udev compat symlink from ACT
+// to led0 and some don't; rather than depend on that, try both names in
+// priority order and use whichever actually exists on this board.
+var ledCandidateNames = []string{"led0", "ACT"}
+
+func ledPaths() (triggerPath, brightnessPath string) {
+	for _, name := range ledCandidateNames {
+		base := "/sys/class/leds/" + name
+		if _, err := os.Stat(base); err == nil {
+			return base + "/trigger", base + "/brightness"
+		}
+	}
+	// Fall back to the historical default; NewLed()'s writes will just fail
+	// (and be logged) if no known ACT LED class device exists on this board.
+	return "/sys/class/leds/led0/trigger", "/sys/class/leds/led0/brightness"
+}
+
+var LED_TRIGGER_PATH, LED_BRIGHTNESS_PATH = ledPaths()
 
 
 type LedState struct {

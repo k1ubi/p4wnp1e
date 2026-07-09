@@ -10,8 +10,6 @@ import (
 )
 
 const (
-	pLED_TRIGGER_PATH = "/sys/class/leds/led0/trigger"
-	pLED_BRIGHTNESS_PATH = "/sys/class/leds/led0/brightness"
 	pLED_TRIGGER_MANUAL = "none"
 	pLED_ON = "0"
 	pLED_OFF = "1"
@@ -19,6 +17,11 @@ const (
 	pLED_DELAY_OFF = 200 * time.Millisecond
 	pLED_DELAY_PAUSE = 500 * time.Millisecond
 )
+
+// Pi4B PORT NOTE: see ledPaths() in led.go - same led0-vs-ACT sysfs naming
+// issue applies here, this is a separate/parallel LED implementation
+// (LedService) in the same package.
+var pLED_TRIGGER_PATH, pLED_BRIGHTNESS_PATH = ledPaths()
 
 type LedState1 struct {
 	Available bool
