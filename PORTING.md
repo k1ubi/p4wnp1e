@@ -293,6 +293,31 @@ TriggerAction is a separate feature request.
 | Standard nexmon monitor mode / injection (KARMA, deauth) | **Ported** | Upstream nexmon has a real bcm43455c0 target; see `build_support/pi4b/nexmon/build-nexmon.sh`. |
 | Custom re4son kernel (patched dwc2 + brcmfmac) | **Not needed** | Both patches were only needed to work around gaps that stock mainline kernel + this port's code changes now cover (sysfs UDC state, firmware-blob swap instead of driver patch). Stock Raspberry Pi OS Bookworm kernel is the target. |
 
+## Two more fixes, and one mistake caught by tooling rather than review
+
+`build-image.sh` wrote `config.txt`/`cmdline.txt` and the NetworkManager conf
+*before* running `apt-get install` in the chroot. If a boot-firmware package
+regenerates those files as part of its own postinst when (re)installed, the
+edits would get silently clobbered. Reordered so they're written last,
+regardless of what package scripts did during install - cheap fix, correct
+either way, no need to actually resolve whether that package does this to
+justify making it not matter.
+
+Also went looking for genuinely dead code once `dwc2_connect_watcher.go`
+stopped needing `mgenetlink`/`mnetlink`. Grepping this repo's own `.go` files
+found no importers of either, so both looked safe to delete - but `mnetlink`
+turned out to still be a real, load-bearing transitive dependency of
+`service/bluetooth.go` via the external `github.com/mame82/mblue-toolz`
+library, which lives in the Go module cache, not this repo, so a repo-local
+grep can't see it. `go build ./...` failed immediately on the deletion and
+said exactly why. `mnetlink` was restored; `mgenetlink` (which nothing,
+anywhere, actually imports) was removed for real, confirmed by a full build
++ `go mod tidy` succeeding, not just a clean grep. Worth stating plainly
+rather than glossing over: this is exactly the kind of mistake "I checked
+and it's unused" can hide, and exactly why `.github/workflows/build.yml` now
+runs a full cross-compile on every push instead of relying on manual
+verification each time.
+
 ## Quickstart
 
 ```sh

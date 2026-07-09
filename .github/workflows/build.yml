@@ -1,0 +1,41 @@
+name: build
+
+# Catches exactly the kind of regression this branch almost shipped once:
+# removing what looked like dead code (mgenetlink) without noticing an
+# external dependency (mblue-toolz) transitively imported its sibling
+# package (mnetlink). `go build ./...` would have caught it immediately.
+#
+# Intentionally minimal: no arm64 hardware to actually run the binaries on
+# in CI, so this checks what a coding session can check - it compiles - not
+# that it works on a Pi4B. See PORTING.md for the actual verification split.
+
+on:
+  push:
+    branches: [pi4b-port]
+  pull_request:
+    branches: [pi4b-port]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Cross-compile backend for arm64
+        run: ./build_support/pi4b/build.sh
+
+      - name: go vet (excluding GopherJS-only web_client)
+        run: go vet $(go list ./... | grep -v /web_client)
+
+      - name: Shell syntax check
+        run: |
+          for f in build_support/pi4b/build.sh \
+                   build_support/pi4b/nexmon/build-nexmon.sh \
+                   build_support/pi4b/image/build-image.sh \
+                   build_support/pi4b/verify-on-device.sh; do
+            bash -n "$f"
+          done

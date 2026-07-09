@@ -30,6 +30,22 @@
 - fix: `haveged` was being enabled unnecessarily on Pi4B, which has a real
   hardware RNG (`bcm2711-rng200`) that Pi0W lacked; no longer enabled,
   matching Kali's own current Pi4/5 build
+- fix: `build-image.sh` wrote `config.txt`/`cmdline.txt` and the
+  NetworkManager conf *before* running `apt-get install` in the chroot;
+  reordered to write them last, since a boot-firmware package's postinst
+  regenerating those files during install would otherwise silently clobber
+  the edits
+- removed: `mgenetlink` (793 lines combined with `mnetlink` before this),
+  confirmed genuinely unused anywhere in the tree or its dependencies after
+  the dwc2 watcher rewrite - checked by removing it and running a full
+  `go build ./...` + `go mod tidy`, not just grepping this repo's own
+  `.go` files (which is exactly what missed that `mnetlink`, unlike
+  `mgenetlink`, is still a real transitive dependency of `service/bluetooth.go`
+  via the external `mblue-toolz` library - restored immediately once that
+  build failure surfaced it)
+- added: minimal CI (`.github/workflows/build.yml`) - cross-compiles the
+  backend for arm64, runs `go vet`, syntax-checks every shell script, on
+  every push/PR to `pi4b-port`
 
 ## v0.1.1-beta
 

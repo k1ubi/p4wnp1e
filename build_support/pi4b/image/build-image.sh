@@ -33,7 +33,7 @@
 #                    nexmon) since Raspberry Pi OS doesn't package it.
 #
 # Both are Debian-based, both default to NetworkManager (confirmed for Kali
-# too, not just Bookworm), so the rest of this script (steps 6-8) is
+# too, not just Bookworm), so the rest of this script (steps 6-9) is
 # distro-agnostic.
 #
 # NOT EXECUTED IN THIS SESSION: this needs loopback mount + chroot (or
@@ -166,19 +166,7 @@ cp "$REPO_ROOT/build/webapp.js" "$ROOTFS/usr/local/P4wnP1/www/"
 cp "$REPO_ROOT/build/webapp.js.map" "$ROOTFS/usr/local/P4wnP1/www/"
 cp "$REPO_ROOT/dist/P4wnP1.service" "$ROOTFS/etc/systemd/system/P4wnP1.service"
 
-echo "=== 7. Boot config (dwc2 peripheral mode) ==="
-cat "$REPO_ROOT/build_support/pi4b/boot/config.txt.snippet" >> "$BOOT_MOUNT/config.txt"
-CMDLINE_FILE="$BOOT_MOUNT/cmdline.txt"
-if ! grep -q 'modules-load=dwc2' "$CMDLINE_FILE"; then
-	sed -i 's/rootwait/rootwait modules-load=dwc2/' "$CMDLINE_FILE"
-fi
-
-echo "=== 8. NetworkManager: don't manage P4wnP1's interfaces ==="
-mkdir -p "$ROOTFS/etc/NetworkManager/conf.d"
-cp "$REPO_ROOT/build_support/pi4b/network/10-p4wnp1-unmanaged.conf" \
-   "$ROOTFS/etc/NetworkManager/conf.d/10-p4wnp1-unmanaged.conf"
-
-echo "=== 9. Package dependencies + service enablement (inside chroot) ==="
+echo "=== 7. Package dependencies + service enablement (inside chroot) ==="
 NEXMON_PACKAGES=""
 if [ "$BASE_DISTRO" = "kali" ]; then
 	# Officially maintained by Kali since 2025.1 - DKMS driver + patched
@@ -257,6 +245,25 @@ systemctl enable P4wnP1.service
 # libcomposite is loaded on demand by P4wnP1_service itself
 # (service/SubSysUSB.go's CheckLibComposite), nothing to enable here.
 CHROOT_EOF
+
+# Boot config and the NetworkManager conf are written AFTER package
+# installation on purpose, not before: raspi-firmware (or an equivalent boot
+# firmware package) can regenerate config.txt/cmdline.txt as part of its own
+# postinst when (re)installed/upgraded above. Writing our dwc2/NM changes
+# first and apt-get afterward risks apt silently clobbering them. This way
+# our edits are always the last word, regardless of what package scripts did
+# during step 7.
+echo "=== 8. Boot config (dwc2 peripheral mode) ==="
+cat "$REPO_ROOT/build_support/pi4b/boot/config.txt.snippet" >> "$BOOT_MOUNT/config.txt"
+CMDLINE_FILE="$BOOT_MOUNT/cmdline.txt"
+if ! grep -q 'modules-load=dwc2' "$CMDLINE_FILE"; then
+	sed -i 's/rootwait/rootwait modules-load=dwc2/' "$CMDLINE_FILE"
+fi
+
+echo "=== 9. NetworkManager: don't manage P4wnP1's interfaces ==="
+mkdir -p "$ROOTFS/etc/NetworkManager/conf.d"
+cp "$REPO_ROOT/build_support/pi4b/network/10-p4wnp1-unmanaged.conf" \
+   "$ROOTFS/etc/NetworkManager/conf.d/10-p4wnp1-unmanaged.conf"
 
 install -m 0755 "$REPO_ROOT/build_support/pi4b/verify-on-device.sh" "$ROOTFS/usr/local/P4wnP1/verify-on-device.sh"
 
