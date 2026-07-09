@@ -183,6 +183,36 @@ disabling it wholesale — so a physical `eth0` or an unrelated WiFi adapter
 still gets normal DHCP/NM convenience, which the old blanket-disable approach
 didn't preserve.
 
+### `dhcpcd` — a real gap, found by reading Kali's own build recipe
+
+Kali's official build-scripts repo (`gitlab.com/kalilinux/build-scripts/kali-arm`)
+still carries a live `raspberry-pi-zero-w-p4wnp1-aloa.sh`, plus the generic
+`raspberry-pi.sh` used for the actual Pi4/5 arm64 images. Reading both against
+this port's code turned up one real, concrete gap: `service/dhcp.go`'s DHCP
+*client* mode (WiFi STA joining an existing network, etc.) execs
+`/sbin/dhcpcd` directly — hardcoded path, merged-usr resolves it to
+`/usr/sbin/dhcpcd`. Neither Bookworm nor current Kali installs `dhcpcd` by
+default (both default to NetworkManager for everything P4wnP1 doesn't
+already own), so without it DHCP client mode would fail outright the first
+time anyone tried it. `dhcpcd5` (Debian/Kali's transitional package name,
+pulling in the real `dhcpcd` package) is now in `build-image.sh`'s install
+list, with its systemd service disabled straight after — same reasoning
+Kali's own script uses: P4wnP1 invokes the binary directly, on demand, per
+interface, so the packaged systemd unit (which tries to manage every
+interface on boot) only gets in the way.
+
+Also corrected against that same script: **not** enabling `haveged`. Pi4B has
+a real hardware RNG (`bcm2711-rng200`) feeding the kernel entropy pool
+directly; Pi0W didn't, which is why upstream enabled haveged in the first
+place. Kali's current Pi4/5 build explicitly disables haveged for exactly
+this reason — matched here instead of carrying over the Pi0W-era default.
+
+Everything else in that script (`brcmfmac-nexmon-dkms`/`firmware-nexmon`,
+`pi-bluetooth`, `hciuart`/`bluetooth` service enablement, `BCM4345C0.hcd`,
+`/boot/firmware` layout) already matched what this port had independently
+arrived at or is already baked into Kali's published image — good
+convergent-evidence check, not new information.
+
 ## Base image: Kali vs. Raspberry Pi OS
 
 First pass of this port defaulted to vanilla Raspberry Pi OS Lite arm64,

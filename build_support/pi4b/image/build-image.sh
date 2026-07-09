@@ -193,13 +193,30 @@ chroot "$ROOTFS" /usr/bin/env bash -eux <<CHROOT_EOF
 apt-get update
 # Same functional package set as the Makefile's commented-out \`dep\`/
 # \`installkali\` apt-get lines, translated to current package names.
+#
+# dhcpcd IS THE ONE REAL GAP HERE, found by reading Kali's own current
+# raspberry-pi-zero-w-p4wnp1-aloa.sh build recipe
+# (gitlab.com/kalilinux/build-scripts/kali-arm) against service/dhcp.go:
+# P4wnP1's DHCP *client* mode (e.g. WiFi STA joining an existing network)
+# execs the dhcpcd binary directly - \`exec.Command("/sbin/dhcpcd", ...)\`,
+# hardcoded path, merged-usr symlinks it to /usr/sbin/dhcpcd. Neither
+# Bookworm nor current Kali installs dhcpcd by default (both default to
+# NetworkManager), so without this package DHCP client mode fails outright.
+# Package name on Debian/Kali is \`dhcpcd5\` (a transitional package pulling
+# in the real \`dhcpcd\` package - both resolve fine via apt).
+#
+# Everything else below (hostapd/wpasupplicant/dnsmasq/iw/bluez/etc.) is
+# very likely already part of Kali's own default toolset - this list is
+# apt idempotent either way, so no harm in stating it explicitly, especially
+# for BASE_DISTRO=raspios where none of it is a given.
 apt-get install -y --no-install-recommends \
 	hostapd wpasupplicant dnsmasq iw \
+	dhcpcd5 \
 	bluez bluez-tools \
 	bridge-utils \
 	screen tmux \
 	genisoimage \
-	haveged avahi-daemon \
+	avahi-daemon \
 	usbutils rfkill \
 	python3 python3-pip \
 	$NEXMON_PACKAGES
@@ -210,18 +227,33 @@ apt-get install -y --no-install-recommends \
 systemctl mask hostapd.service || true
 systemctl mask dnsmasq.service || true
 
+# Same story for dhcpcd: P4wnP1 execs the binary directly, on demand, per
+# interface (service/dhcp.go). The dhcpcd *package* also ships a systemd
+# service that, left enabled, tries to manage every interface it finds on
+# boot - which both fights P4wnP1's own on-demand invocation and duplicates
+# what NetworkManager already does for everything P4wnP1 doesn't own. Kali's
+# own P4wnP1 build script disables this exact service for the exact same
+# reason - not a guess, matching their documented practice.
+systemctl disable dhcpcd.service || true
+
 # Bluetooth on Pi boards is UART-attached; both Kali's docs
 # (kali.org/docs/arm/raspberry-pi-4) and stock Raspberry Pi OS need this
 # explicitly enabled before BlueZ sees a controller at all - without it,
 # service/bluetooth.go's FindFirstAvailableController() just times out.
+# (Already done on Kali's own published Pi images - harmless to repeat.)
 systemctl enable hciuart.service || true
 systemctl enable bluetooth.service || true
 
 systemctl daemon-reload
-systemctl enable haveged
 systemctl enable avahi-daemon
 systemctl enable P4wnP1.service
 
+# NOT enabling haveged: Pi4B has a real hardware RNG (bcm2711-rng200) feeding
+# the kernel entropy pool directly, unlike Pi0W which needed haveged's
+# software jitter entropy for hostapd/sshd to unblock at boot. Kali's own
+# current Pi4/5 build script explicitly disables haveged for this reason -
+# matching that instead of upstream P4wnP1's Pi0W-era default of enabling it.
+#
 # libcomposite is loaded on demand by P4wnP1_service itself
 # (service/SubSysUSB.go's CheckLibComposite), nothing to enable here.
 CHROOT_EOF
