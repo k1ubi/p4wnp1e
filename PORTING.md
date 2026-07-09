@@ -222,24 +222,38 @@ keeps working across kernel bumps — `BASE_DISTRO=kali` is now the default in
 `build_support/pi4b/nexmon/build-nexmon.sh`'s from-source build) is kept for
 anyone who specifically wants a non-Kali image.
 
-**Caveat worth stating plainly:** Kali's DKMS nexmon is architecturally
-different from how P4wnP1 originally used nexmon on Pi0W. The Pi0W firmware
-was a single image that P4wnP1 swapped in/out and reloaded the whole
-`brcmfmac` module for (`service/wifi.go`'s `setNexmonFirmware()`, this port's
-fix for the previously-stubbed nexmon toggle). Kali's DKMS package installs
-one always-on nexmon-patched firmware system-wide and exposes monitor mode as
-an *additional* `wlan0mon` interface via `airmon-ng`/`iw`, coexisting with
-the normal `wlan0` P4wnP1 already manages for AP/STA — no swap-and-reload
-needed or possible. On a `BASE_DISTRO=kali` build, `detectBrcmfmacFirmwareBase()`
-won't find the `.rpi.bin`/`.nexmon.bin` variant files it looks for (there's
-only ever one firmware installed), so the CLI/WebUI's "Nexmon" toggle will
-log a harmless warning and otherwise no-op — monitor mode still works, just
-via `airmon-ng`/`iw` directly rather than through that toggle. Wiring
-`wlan0mon` creation into the gRPC-driven Nexmon flag (so KARMA-style sniffing
-can run through the same UI as everything else) is a real feature change,
-not a port task, and is left as follow-up work rather than something
-attempted blind without hardware to validate the interaction with the
-existing hostapd/wpa_supplicant lifecycle.
+**Update: `wlan0mon` is now wired into the Nexmon toggle for both mechanisms.**
+Kali's DKMS nexmon is architecturally different from how P4wnP1 originally
+used nexmon on Pi0W - the Pi0W firmware was a single image that P4wnP1
+swapped in/out and reloaded the whole `brcmfmac` module for
+(`service/wifi.go`'s `setNexmonFirmware()`, this port's earlier fix for the
+previously-stubbed toggle). Kali's DKMS package instead installs one
+always-on nexmon-patched firmware system-wide and exposes monitor mode as an
+*additional* `wlan0mon` interface via `airmon-ng`/`iw` (`iw dev wlan0
+interface add wlan0mon type monitor`), coexisting with the normal `wlan0`
+P4wnP1 already manages for AP/STA - no swap-and-reload needed or possible.
+
+`service/wifi.go`'s `setNexmon()` now unifies both: enabling tries
+`createMonitorInterface()` first (cheap, non-disruptive - succeeds
+immediately if nexmon firmware/driver is already active system-wide, which is
+always true on `BASE_DISTRO=kali`). Only if that fails (the loaded firmware
+doesn't advertise monitor-mode support - the `BASE_DISTRO=raspios` case, stock
+firmware not yet swapped) does it fall back to `setNexmonFirmware(true)` +
+retry the monitor-vif creation with a short backoff while `brcmfmac`
+reloads and `wlan0` reappears. Disabling always drops `wlan0mon` if present,
+and additionally reverts to stock firmware where that mechanism applies
+(silently a no-op on Kali, where there's no separate stock/nexmon firmware
+pair to revert). `DeploySettings` calls `setNexmon(newWifiSettings.Nexmon)`
+instead of `setNexmonFirmware` directly now, so the existing CLI
+(`--nonexmon`) and WebUI "Nexmon" toggle drive this transparently on either
+base image, from one binary, without needing to know which mechanism is
+actually backing it on a given board.
+
+Not yet wired up: actually consuming `wlan0mon` for anything (KARMA-style
+passive sniffing, deauth, etc.) inside P4wnP1's own feature set - today the
+toggle only guarantees the interface exists/doesn't, same as running
+`airmon-ng start/stop wlan0` by hand would. Using it from a HIDScript or
+TriggerAction is a separate feature request.
 
 ## Explicitly not ported (and why)
 

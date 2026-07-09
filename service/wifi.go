@@ -30,6 +30,13 @@ const (
 	HOSTAPD_WAIT_AP_UP_TIMEOUT        = time.Second * 8
 
 	brcmfmacFirmwareDir = "/lib/firmware/brcm"
+
+	// Same naming convention airmon-ng uses, so anyone used to Kali's usual
+	// `airmon-ng start wlan0` workflow finds what they expect.
+	monitorIfaceName = wifi_if_name + "mon"
+
+	monitorRetryInterval = 250 * time.Millisecond
+	monitorRetryAttempts = 20 // ~5s total, enough for brcmfmac to reload + wlan0 to reappear
 )
 
 // PORT NOTE: upstream never actually implemented this - DeploySettings had a
@@ -100,6 +107,84 @@ func setNexmonFirmware(enable bool) error {
 		return fmt.Errorf("installed firmware %s but failed to reload brcmfmac: %v", dstPath, err)
 	}
 	return nil
+}
+
+// createMonitorInterface adds a monitor-type virtual interface alongside
+// wlan0 (same mechanism airmon-ng uses under the hood: `iw dev <if>
+// interface add <name> type monitor`). This only succeeds if the currently
+// loaded firmware/driver actually advertises monitor-mode support - stock,
+// non-nexmon brcmfmac firmware doesn't, so this is also how we detect
+// whether nexmon firmware is already active without needing to know *how*
+// it got that way (Kali's always-on DKMS package vs. a manual firmware swap
+// both end up in the same state: wlan0 supports adding a monitor vif).
+func createMonitorInterface() error {
+	if CheckInterfaceExistence(monitorIfaceName) {
+		return nil
+	}
+	out, err := exec.Command("iw", "dev", wifi_if_name, "interface", "add", monitorIfaceName, "type", "monitor").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("iw dev %s interface add %s type monitor: %v (%s)", wifi_if_name, monitorIfaceName, err, strings.TrimSpace(string(out)))
+	}
+	return NetworkLinkUp(monitorIfaceName)
+}
+
+func destroyMonitorInterface() error {
+	if !CheckInterfaceExistence(monitorIfaceName) {
+		return nil
+	}
+	out, err := exec.Command("iw", "dev", monitorIfaceName, "del").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("iw dev %s del: %v (%s)", monitorIfaceName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// setNexmon is what actually backs the CLI/WebUI "Nexmon" toggle
+// (WiFiSettings.Nexmon). It transparently supports both mechanisms nexmon
+// can end up running under on a Pi:
+//
+//   - Kali (BASE_DISTRO=kali, brcmfmac-nexmon-dkms + firmware-nexmon): the
+//     nexmon-patched firmware is always loaded system-wide - see
+//     PORTING.md "Base image: Kali vs. Raspberry Pi OS". wlan0 already
+//     supports a monitor-mode vif without touching wlan0 itself at all, so
+//     that's tried first - it's the cheap, non-disruptive path.
+//   - Raspberry Pi OS (BASE_DISTRO=raspios,
+//     build_support/pi4b/nexmon/build-nexmon.sh): nexmon capability requires
+//     swapping in a different firmware file and reloading brcmfmac
+//     (setNexmonFirmware), which drops and recreates wlan0 itself. Only
+//     falls back to this if the direct monitor-vif attempt fails, i.e. the
+//     currently loaded firmware doesn't support monitor mode yet - then
+//     retries the monitor-vif creation with a short backoff while wlan0
+//     comes back up after the reload.
+func setNexmon(enable bool) error {
+	if !enable {
+		errMon := destroyMonitorInterface()
+		// Also revert to stock firmware if this board uses the swap
+		// mechanism; on Kali's DKMS setup there's no separate stock/nexmon
+		// firmware pair to revert, so detectBrcmfmacFirmwareBase() erroring
+		// out here is expected, not a real failure.
+		if errFw := setNexmonFirmware(false); errFw != nil {
+			log.Printf("... no firmware-swap variant to revert (expected under Kali's DKMS nexmon): %v\n", errFw)
+		}
+		return errMon
+	}
+
+	if err := createMonitorInterface(); err == nil {
+		return nil
+	}
+
+	if err := setNexmonFirmware(true); err != nil {
+		return fmt.Errorf("wlan0 doesn't support monitor mode with the currently loaded firmware, and installing nexmon firmware also failed: %v", err)
+	}
+
+	var lastErr error
+	for i := 0; i < monitorRetryAttempts; i++ {
+		time.Sleep(monitorRetryInterval)
+		if lastErr = createMonitorInterface(); lastErr == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("nexmon firmware installed but %s still couldn't be created after reload: %v", monitorIfaceName, lastErr)
 }
 
 func wifiCheckExternalBinaries() error {
@@ -418,13 +503,15 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	defer wSvc.mutexSettings.Unlock()
 
 
-	// Swap brcmfmac firmware variant (patched/stock) and reload the module
-	// if the requested state differs from what's currently loaded. Logged
-	// but non-fatal: a board without build_support/pi4b/nexmon/build-nexmon.sh
-	// firmware installed should still be able to deploy plain (non-nexmon)
+	// Bring the wlan0mon monitor interface in line with the requested state
+	// (creating it directly if nexmon firmware is already active system-wide
+	// - Kali's DKMS package - or falling back to a firmware swap+reload if
+	// not - see setNexmon's doc comment). Logged but non-fatal: a board with
+	// neither Kali's nexmon packages nor build_support/pi4b/nexmon/build-nexmon.sh's
+	// output installed should still be able to deploy plain (non-nexmon)
 	// WiFi settings.
-	if nexErr := setNexmonFirmware(newWifiSettings.Nexmon); nexErr != nil {
-		log.Printf("... nexmon firmware toggle (requested enable=%v) failed, continuing with currently loaded firmware: %v\n", newWifiSettings.Nexmon, nexErr)
+	if nexErr := setNexmon(newWifiSettings.Nexmon); nexErr != nil {
+		log.Printf("... nexmon/monitor-mode toggle (requested enable=%v) failed, continuing: %v\n", newWifiSettings.Nexmon, nexErr)
 	}
 
 	//stop wpa_supplicant if needed
