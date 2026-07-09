@@ -1,0 +1,33 @@
+# Pi4B PORT - append to /boot/firmware/config.txt (Bookworm moved the boot
+# partition from /boot to /boot/firmware; older Raspberry Pi OS releases used
+# /boot directly - check which one you're on before editing).
+#
+# Background: Pi4B's USB-C port is wired to the SoC's internal dwc2
+# controller's data lines (unlike some early rumors/forum confusion - this was
+# confirmed on real Pi4B hardware: forums.raspberrypi.com/viewtopic.php?t=391191,
+# blog.hardill.me.uk/2019/11/02/pi4-usb-c-gadget). This is the *same* dwc2 core
+# used by Pi Zero W's micro-USB port, so P4wnP1's configfs/libcomposite gadget
+# code (service/SubSysUSB.go) needs zero changes - it only ever talks to
+# /sys/kernel/config/usb_gadget and /sys/class/udc, both generic Linux gadget
+# framework paths, not anything Pi0-specific.
+#
+# dr_mode=peripheral forces the controller into device/gadget mode
+# deterministically at boot, rather than relying on OTG ID-pin auto-sensing
+# (which is what you'd want if you also wanted this port to act as a USB host
+# sometimes - P4wnP1 never wants that, it should always come up as a gadget).
+#
+# Note: the four USB-A ports (via the VL805 xHCI controller) are completely
+# separate hardware from the dwc2 core and are NOT affected by this - they
+# stay in host mode always. This is actually new capability vs Pi Zero W: you
+# can plug in a USB wifi adapter, external storage, etc. into the USB-A ports
+# *while* the USB-C port is simultaneously acting as the HID/RNDIS/mass-storage
+# gadget. Pi Zero W had no spare host-mode USB port at all.
+dtoverlay=dwc2,dr_mode=peripheral
+
+# Not required for gadget mode itself, but if you ever want to fall back to
+# USB-C host mode for development/debugging (e.g. plugging in a keyboard
+# directly), the community-documented flip is:
+#   sudo modprobe -r dwc2
+#   sudo dtoverlay dwc2 dr_mode=host
+#   sudo modprobe dwc2
+# (forums.raspberrypi.com/viewtopic.php?t=246348)

@@ -1,0 +1,27 @@
+Pi4B PORT - edit /boot/firmware/cmdline.txt (single line, no newlines allowed
+in the real file - this is just documentation of what to add).
+
+Add straight after "rootwait":
+
+    modules-load=dwc2
+
+Do NOT add g_ether / g_mass_storage / g_hid here. Those are the legacy
+single-function gadget kernel modules (from the old g_* gadget driver family).
+P4wnP1 builds its gadget dynamically through configfs + libcomposite
+(service/SubSysUSB.go), which supports mixing HID keyboard + HID mouse + RNDIS
++ CDC-ECM + mass storage + ACM serial in one composite device and switching
+functions at runtime over gRPC. Loading a g_* module here would fight with
+that (and likely fail to bind to the UDC that P4wnP1's configfs gadget wants).
+
+"modules-load=dwc2" only makes sure the dwc2 driver itself is loaded before
+userspace starts, so /sys/class/udc/<name> and configfs's usb_gadget support
+exist by the time P4wnP1.service runs and calls modprobe libcomposite +
+deploys the gadget. This is the exact same cmdline.txt convention used on
+Pi Zero W P4wnP1 images - nothing Pi4-specific here, the dwc2 driver and this
+Raspberry-Pi-kernel-specific early modules-load= cmdline mechanism are
+identical across Pi0W/Pi3/Pi4/Pi5.
+
+Full example line (yours will differ in root=/PARTUUID etc - only the
+modules-load= part is new):
+
+console=serial0,115200 console=tty1 root=PARTUUID=xxxxxxxx-02 rootfstype=ext4 fsck.repair=yes rootwait modules-load=dwc2

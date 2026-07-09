@@ -3,6 +3,7 @@
 package service
 
 import (
+	"bytes"
 	"github.com/mame82/P4wnP1_aloa/common_web"
 	"github.com/mame82/P4wnP1_aloa/netlink"
 	pb "github.com/mame82/P4wnP1_aloa/proto"
@@ -18,6 +19,7 @@ import (
 	"net"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 )
@@ -26,7 +28,79 @@ const (
 	wifi_if_name                   string = "wlan0"
 	WPA_SUPPLICANT_CONNECT_TIMEOUT        = time.Second * 20
 	HOSTAPD_WAIT_AP_UP_TIMEOUT        = time.Second * 8
+
+	brcmfmacFirmwareDir = "/lib/firmware/brcm"
 )
+
+// PORT NOTE: upstream never actually implemented this - DeploySettings had a
+// "//ToDo: Dis/Enable nexmon if needed" where the call below now sits, even
+// though the Nexmon toggle was fully wired up through the proto/CLI/WebUI
+// (proto/grpc.proto WiFiSettings.nexmon, cli_client/cmd_wifi.go --nonexmon,
+// web_client/hvueComponentWiFi.go's "Nexmon" q-toggle). In practice the
+// "toggle" only ever did anything if you'd manually copied the right firmware
+// file into place yourself before booting.
+//
+// Supports both known brcmfmac sdio chips so the same binary/image works
+// whether it ends up on a Pi0W (brcmfmac43430-sdio) or Pi4B
+// (brcmfmac43455-sdio) - see build_support/pi4b/nexmon/build-nexmon.sh, which
+// installs "<base>.nexmon.bin" (patched) and "<base>.rpi.bin" (stock backup)
+// next to the canonical "<base>.bin" that the kernel driver actually loads.
+func detectBrcmfmacFirmwareBase() (string, error) {
+	candidates := []string{"brcmfmac43430-sdio", "brcmfmac43455-sdio"}
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(brcmfmacFirmwareDir, c+".rpi.bin")); err == nil {
+			return c, nil
+		}
+		if _, err := os.Stat(filepath.Join(brcmfmacFirmwareDir, c+".nexmon.bin")); err == nil {
+			return c, nil
+		}
+	}
+	return "", errors.New("no known brcmfmac sdio firmware (43430-sdio / 43455-sdio) variants found under " + brcmfmacFirmwareDir + " - has build_support/pi4b/nexmon/build-nexmon.sh been run on this image?")
+}
+
+// setNexmonFirmware copies the requested firmware variant (patched or stock)
+// over the canonical "<base>.bin" the brcmfmac driver actually loads, then
+// cycles the kernel module so it re-reads it. Cycling brcmfmac destroys and
+// recreates wlan0, which is exactly why the caller (DeploySettings) already
+// re-configures the interface right after this point - that comment/handling
+// predates this function and was written for exactly this kind of reload.
+func setNexmonFirmware(enable bool) error {
+	base, err := detectBrcmfmacFirmwareBase()
+	if err != nil {
+		return err
+	}
+
+	variant := base + ".rpi.bin"
+	if enable {
+		variant = base + ".nexmon.bin"
+	}
+	srcPath := filepath.Join(brcmfmacFirmwareDir, variant)
+	dstPath := filepath.Join(brcmfmacFirmwareDir, base+".bin")
+
+	data, err := ioutil.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("firmware variant %s not installed: %v", srcPath, err)
+	}
+
+	// Nothing to do if it's already the active firmware (avoid an
+	// unnecessary module reload / wlan0 bounce on every settings deploy).
+	if current, err := ioutil.ReadFile(dstPath); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+
+	if err := ioutil.WriteFile(dstPath, data, 0644); err != nil {
+		return fmt.Errorf("couldn't install firmware %s: %v", dstPath, err)
+	}
+
+	// brcmfmac only reads firmware off disk on (re)load. Ignore the rmmod
+	// error - the module may be builtin, or the interface may already be
+	// down for another reason; modprobe below is what actually matters.
+	exec.Command("rmmod", "brcmfmac").Run()
+	if err := exec.Command("modprobe", "brcmfmac").Run(); err != nil {
+		return fmt.Errorf("installed firmware %s but failed to reload brcmfmac: %v", dstPath, err)
+	}
+	return nil
+}
 
 func wifiCheckExternalBinaries() error {
 	if !binaryAvailable("wpa_supplicant") {
@@ -344,7 +418,14 @@ func (wSvc *WiFiService) DeploySettings(newWifiSettings *pb.WiFiSettings) (wstat
 	defer wSvc.mutexSettings.Unlock()
 
 
-	//ToDo: Dis/Enable nexmon if needed
+	// Swap brcmfmac firmware variant (patched/stock) and reload the module
+	// if the requested state differs from what's currently loaded. Logged
+	// but non-fatal: a board without build_support/pi4b/nexmon/build-nexmon.sh
+	// firmware installed should still be able to deploy plain (non-nexmon)
+	// WiFi settings.
+	if nexErr := setNexmonFirmware(newWifiSettings.Nexmon); nexErr != nil {
+		log.Printf("... nexmon firmware toggle (requested enable=%v) failed, continuing with currently loaded firmware: %v\n", newWifiSettings.Nexmon, nexErr)
+	}
 
 	//stop wpa_supplicant if needed
 	err = wSvc.StopWpaSupplicant()
