@@ -1,189 +1,150 @@
-// +build arm
+// +build linux
 
 package service
 
 import (
 	"fmt"
-	"errors"
-	"github.com/mame82/P4wnP1_aloa/common_web"
+	"io/ioutil"
+	"strings"
+	"time"
 
-	genl "github.com/mame82/P4wnP1_aloa/mgenetlink"
-	nl "github.com/mame82/P4wnP1_aloa/mnetlink"
+	"github.com/mame82/P4wnP1_aloa/common_web"
 )
 
 /*
-Needs modified dwc2 kernel module, sending multicast generic netlink messages for genl family 'p4wnp1' on multicast group 'dwc2'
+Pi4B PORT NOTE
+==============
+Upstream used a genetlink-based watcher (mgenetlink/mnetlink, family "p4wnp1",
+group "dwc2") fed by a custom, out-of-tree patch to the dwc2 kernel driver. That
+patch only ever existed for one specific Pi Zero W kernel branch
+(re4son-raspberrypi-linux, rpi-4.14.80-re4son-p4wnp1) and was never carried
+forward (see build_support/p4wnp1_aloa_build_notes.md - "Re4son stopped porting
+the modification to newer Kernels"). It also meant this file only ever compiled
+with "// +build arm", so it silently didn't exist on any other GOARCH - which
+means service.go (which references Dwc2ConnectWatcher unconditionally) never
+actually built for arm64 upstream.
 
+There is no equivalent patch for the Pi 4B kernel, and hand-maintaining an
+out-of-tree dwc2 patch per kernel version is exactly the kind of bitrot that
+killed upstream's official image builds. Mainline dwc2, through the generic
+Linux UDC core (drivers/usb/gadget/udc-core.c), already exposes what we need
+with zero patching:
+
+    /sys/class/udc/<udc-name>/state
+
+One of: "not attached", "attached", "powered", "default", "addressed",
+"configured", "suspended". Present on every Pi (Zero/3/4/5/CM4) on a stock
+kernel, because it's part of the generic gadget framework, not a board driver.
+
+This replacement polls that file instead of receiving a netlink event. It's
+looser on latency (bounded by dwc2PollInterval) but needs no kernel patch and
+works on Pi4B (arm64) as well as Pi Zero W (arm) unchanged.
 */
 
 const (
-	fam_name = "p4wnp1"
-	dwc2_group_name = "dwc2"
-
-	// commands
-	dwc2_cmd_connection_state = uint8(0)
-
-	// attributes
-	dwc2_attr_connection_dummy = uint16(0)
-	dwc2_attr_connection_state = uint16(1)
-
+	dwc2PollInterval = 300 * time.Millisecond
+	// "configured" == host has enumerated the gadget and selected a
+	// configuration, i.e. the point at which HID/RNDIS/etc functions are
+	// actually usable. Earlier states are transient parts of enumeration.
+	dwc2StateConfigured = "configured"
 )
-
-var (
-	EP4wnP1FamilyMissing = errors.New("Couldn't find generic netlink family for P4wnP1")
-	EDwc2GrpMissing = errors.New("Couldn't find generic netlink mcast group for P4wnP1 dwc2")
-	EDwc2GrpJoin = errors.New("Couldn't join generic netlink mcast group for P4wnP1 dwc2")
-	EWrongFamily = errors.New("Message not from generic netlink family P4wnP1")
-)
-
 
 type Dwc2ConnectWatcher struct {
 	rootSvc *Service
 
-	genl *genl.Client
-	fam *genl.Family
-
-
 	isRunning bool
+	stopCh    chan struct{}
 	connected bool
-	firstUpdateDone bool
 }
 
-
-func (d * Dwc2ConnectWatcher) update(newStateConnected bool) {
+func (d *Dwc2ConnectWatcher) update(newStateConnected bool) {
+	if d.connected == newStateConnected {
+		return
+	}
 	d.connected = newStateConnected
 
-	// --> here a event could be triggered (in case the event manager is registered)
 	if d.connected {
 		fmt.Println("Connected to USB host")
 		d.rootSvc.SubSysEvent.Emit(ConstructEventTrigger(common_web.TRIGGER_EVT_TYPE_USB_GADGET_CONNECTED))
-		//d.rootSvc.SubSysEvent.Emit(ConstructEventLog("USB watcher", 1, "Connected to USB host"))
-
 	} else {
 		fmt.Println("Disconnected from USB host")
 		d.rootSvc.SubSysEvent.Emit(ConstructEventTrigger(common_web.TRIGGER_EVT_TYPE_USB_GADGET_DISCONNECTED))
-		//d.rootSvc.SubSysEvent.Emit(ConstructEventLog("USB watcher", 1, "Disconnected from USB host"))
 	}
 }
 
-func (d * Dwc2ConnectWatcher) parseMsg(msg nl.Message) (cmd genl.Message, err error) {
-	if msg.Type != d.fam.ID {
-		// Multicast message from different familiy, ignore
-		err = EWrongFamily
-		return
+// readUDCState reads /sys/class/udc/<udcName>/state. getUDCName() already
+// exists in SubSysUSB.go and picks the (only) UDC driver bound to configfs -
+// exactly the one P4wnP1's gadget is bound to.
+func readUDCState() (state string, err error) {
+	udcName, err := getUDCName()
+	if err != nil {
+		return "", err
 	}
 
-	err = cmd.UnmarshalBinary(msg.GetData())
-	if err != nil { return }
-	return
+	raw, err := ioutil.ReadFile("/sys/class/udc/" + udcName + "/state")
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(raw)), nil
 }
 
+func (d *Dwc2ConnectWatcher) evt_loop() {
+	ticker := time.NewTicker(dwc2PollInterval)
+	defer ticker.Stop()
 
-func (d * Dwc2ConnectWatcher) evt_loop() {
-	d.isRunning = true
-	// ToDo, make loop stoppable by non-blocking/interruptable socket read a.k.a select with timeout
-	for d.isRunning {
-		fmt.Println("\nWaiting for messages from P4wnP1 kernel mods...\n")
-		msgs,errm := d.genl.Receive()
-		if errm == nil {
-			for _,msg := range msgs {
-				if cmd,errp := d.parseMsg(msg); errp == nil {
-					switch cmd.Cmd {
-					case dwc2_cmd_connection_state:
-						fmt.Println("COMMAND_CONNECTION_STATE")
-						params,perr := cmd.AttributesFromData()
-						if perr != nil {
-							fmt.Println("Couldn't parse params for COMMAND_CONNECTION_STATE")
-							continue
-						}
-						// find
-						for _,param := range params {
-							if param.Type == dwc2_attr_connection_state {
-								fmt.Println("Connection State: ", param.GetDataUint8())
-								switch param.GetDataUint8() {
-								case 0: //disconnected
-									d.update(false)
-								case 1: //connected
-									d.update(true)
-								}
-							}
-						}
-					default:
-						fmt.Printf("Unknown command:\n%+v\n", cmd)
-					}
-				} else {
-					fmt.Printf("Message ignored:\n%+v\n", msg)
-					continue
-				}
-
+	for {
+		select {
+		case <-d.stopCh:
+			fmt.Println("dwc2 connect watcher poll loop ended")
+			return
+		case <-ticker.C:
+			state, err := readUDCState()
+			if err != nil {
+				// UDC not present (gadget not deployed yet, or dwc2 not bound
+				// as a peripheral-mode UDC at all) - not fatal, just "disconnected".
+				d.update(false)
+				continue
 			}
-		} else {
-			fmt.Println("Receive error: ", errm)
+			d.update(state == dwc2StateConfigured)
 		}
 	}
-
-	fmt.Println("GenNl rcv loop ended")
-
-
 }
 
-func (d * Dwc2ConnectWatcher) IsConnected() bool {
+func (d *Dwc2ConnectWatcher) IsConnected() bool {
 	return d.connected
 }
 
-
-func (d * Dwc2ConnectWatcher) Start() (err error){
-	d.genl,err = genl.NewGeNl() //genl client
-	if err != nil { return err }
-
-	err = d.genl.Open() //Connect to generic netlink
-	if err != nil { return }
-
-	// try to find GENL family for P4wnP1
-	d.fam,err = d.genl.GetFamily(fam_name)
-	if err != nil {
-		d.genl.Close()
-		return EP4wnP1FamilyMissing
+func (d *Dwc2ConnectWatcher) Start() (err error) {
+	if d.isRunning {
+		return nil
 	}
-
-	// try to join group for dwc2
-	grpId,err := d.fam.GetGroupByName(dwc2_group_name)
-	if err != nil {
-		d.genl.Close()
-		return EDwc2GrpMissing
-	}
-	err = d.genl.AddGroupMembership(grpId)
-	if err != nil {
-		d.genl.Close()
-		return EDwc2GrpMissing
-	}
-
-
-
-
 	d.isRunning = true
-	go d.evt_loop()
+	d.stopCh = make(chan struct{})
 
+	// Prime initial state immediately, instead of waiting up to
+	// dwc2PollInterval for the first tick, so a client already connected at
+	// service start gets an accurate IsConnected() right away.
+	if state, err := readUDCState(); err == nil {
+		d.connected = state == dwc2StateConfigured
+	}
+
+	go d.evt_loop()
 	return nil
 }
 
-func (d * Dwc2ConnectWatcher) Stop() error {
-	d.isRunning = false
-
-	// leave dwc2 group
-	if grpId,err := d.fam.GetGroupByName(dwc2_group_name); err == nil {
-		d.genl.DropGroupMembership(grpId)
+func (d *Dwc2ConnectWatcher) Stop() error {
+	if !d.isRunning {
+		return nil
 	}
-	// close soket
-	return d.genl.Close()
-
+	d.isRunning = false
+	close(d.stopCh)
+	return nil
 }
 
 func NewDwc2ConnectWatcher(rootSvc *Service) (d *Dwc2ConnectWatcher) {
-
 	d = &Dwc2ConnectWatcher{
 		rootSvc: rootSvc,
 	}
 	return d
 }
-

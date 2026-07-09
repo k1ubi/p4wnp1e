@@ -1,4 +1,4 @@
-// +build linux,arm
+// +build linux
 
 package main
 

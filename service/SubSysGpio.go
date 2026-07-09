@@ -6,12 +6,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/mame82/P4wnP1_aloa/service/pgpio"
-	"periph.io/x/periph"
-	"periph.io/x/periph/conn/gpio"
-	"periph.io/x/periph/conn/gpio/gpioreg"
-	"periph.io/x/periph/conn/pin/pinreg"
-	"periph.io/x/periph/host"
-	"periph.io/x/periph/host/rpi"
+	"periph.io/x/conn/v3/driver/driverreg"
+	"periph.io/x/conn/v3/gpio"
+	"periph.io/x/conn/v3/gpio/gpioreg"
+	"periph.io/x/conn/v3/pin/pinreg"
+	"periph.io/x/host/v3"
+	"periph.io/x/host/v3/rpi"
 	"sync"
 	"time"
 	"errors"
@@ -35,7 +35,7 @@ type GpioManager struct {
 
 	IsUsable bool
 
-	*periph.State
+	*driverreg.State
 }
 
 func (gm *GpioManager) Start() {

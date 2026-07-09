@@ -1,4 +1,9 @@
-// +build linux,arm
+// +build linux
+
+// Pi4B PORT NOTE: was "linux,arm" (Pi Zero W / ARMv6 only). The backend has no
+// arch-specific code path left (see PORTING.md) so this now builds for any
+// GOOS=linux target, including GOARCH=arm64 (Pi 4B) and GOARCH=amd64 (dev/test
+// builds off-device).
 
 package main
 
