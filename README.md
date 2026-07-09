@@ -12,7 +12,7 @@
   <img alt="base" src="https://img.shields.io/badge/base-Kali%20Linux-557c94?style=flat-square&logo=kalilinux&logoColor=white">
   <img alt="lang" src="https://img.shields.io/badge/backend-Go-00add8?style=flat-square&logo=go&logoColor=white">
   <img alt="status" src="https://img.shields.io/badge/hardware%20verified-NOT%20YET-ff2079?style=flat-square">
-  <img alt="license" src="https://img.shields.io/badge/license-see%20LICENSE-lightgrey?style=flat-square">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/k1ubi/p4wnp1e?style=flat-square&color=8957e5"></a>
 </p>
 
 <p align="center"><sub>
