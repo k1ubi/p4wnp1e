@@ -1,21 +1,7 @@
-<p align="center">
-  <img src="docs/banner.svg" alt="P4wnP1e — Raspberry Pi 4B Edition" width="700">
-</p>
+<div align="center">
+<img src="./assets/hero.svg" width="100%"/>
+</div>
 
-<p align="center">
-  <img alt="platform" src="https://img.shields.io/badge/PLATFORM-PI%204B-08f7fe?style=for-the-badge&labelColor=0a0014&logo=raspberrypi&logoColor=08f7fe">
-  <img alt="arch" src="https://img.shields.io/badge/ARCH-ARM64-ff2079?style=for-the-badge&labelColor=0a0014">
-  <img alt="base" src="https://img.shields.io/badge/BASE-KALI-8957e5?style=for-the-badge&labelColor=0a0014&logo=kalilinux&logoColor=8957e5">
-  <img alt="status" src="https://img.shields.io/badge/HW%20VERIFIED-NOT%20YET-ff003c?style=for-the-badge&labelColor=0a0014">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/k1ubi/p4wnp1e?style=for-the-badge&labelColor=0a0014&color=08f7fe"></a>
-</p>
-
-<p align="center"><sub>
-keyboard · mouse · network card · mass storage · wifi AP — one USB port,
-switched at runtime over gRPC. born on the Pi Zero W, ported here to the Pi 4B.
-</sub></p>
-
----
 
 ### `> WHAT THIS IS`
 
